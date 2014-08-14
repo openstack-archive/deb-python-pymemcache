@@ -1,3 +1,9 @@
+python-pymemcache (1.2.4-2) unstable; urgency=medium
+
+  * Added missing build-depends: python-nose, python3-nose.
+
+ -- Thomas Goirand <zigo@debian.org>  Thu, 14 Aug 2014 23:35:40 +0800
+
 python-pymemcache (1.2.4-1) unstable; urgency=medium
 
   * Initial release. (Closes: #758135)
