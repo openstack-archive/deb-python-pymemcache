@@ -20,6 +20,10 @@ override_dh_install:
 	done
 	rm -rf $(CURDIR)/debian/python*-pymemcache/usr/lib/python*/dist-packages/*.pth
 
+# This is needed for my jenkins build
+override_dh_auto_clean:
+	@echo "Nothing to do"
+
 override_dh_auto_test:
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 	set -e && for pyvers in $(PYTHONS) $(PYTHON3S); do \
