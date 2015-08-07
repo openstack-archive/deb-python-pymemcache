@@ -10,10 +10,12 @@ Build-Depends: debhelper (>= 9),
                python3-all,
                python3-setuptools,
 Build-Depends-Indep: python-nose,
+                     python-pytest,
                      python-six,
                      python3-nose,
+                     python3-pytest,
                      python3-six,
-Standards-Version: 3.9.5
+Standards-Version: 3.9.6
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/python-pymemcache.git
 Vcs-Git: git://anonscm.debian.org/openstack/python-pymemcache.git
 Homepage: https://github.com/Pinterest/pymemcache
