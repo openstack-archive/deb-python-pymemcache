@@ -26,9 +26,11 @@ override_dh_auto_clean:
 
 override_dh_auto_test:
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
-	set -e && for pyvers in $(PYTHONS) $(PYTHON3S); do \
-		python$$pyvers setup.py nosetests ; \
-	done
+	py.test
+	py.test-3
+#	set -e && for pyvers in $(PYTHONS) $(PYTHON3S); do \
+#		python$$pyvers setup.py nosetests ; \
+#	done
 endif
 
 override_dh_clean:
