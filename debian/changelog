@@ -5,6 +5,7 @@ python-pymemcache (1.3.2-1) unstable; urgency=medium
   * Fixed build-depends.
   * Removed Python 3.2 patch.
   * Added pytest as build-depends.
+  * Fixed watch file to use github tag and not pypi.
 
  -- Thomas Goirand <zigo@debian.org>  Fri, 07 Aug 2015 07:46:45 +0000
 
