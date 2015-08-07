@@ -1,8 +1,15 @@
 pymemcache
 ==========
 
-[![Build
-Status](https://travis-ci.org/pinterest/pymemcache.png)](https://travis-ci.org/pinterest/pymemcache)
+.. image:: https://travis-ci.org/pinterest/pymemcache.png
+    :target: https://travis-ci.org/pinterest/pymemcache
+
+.. image:: https://img.shields.io/pypi/v/pymemcache.svg
+    :target: https://pypi.python.org/pypi/pymemcache
+
+.. image:: https://readthedocs.org/projects/pymemcache/badge/?version=master
+        :target: http://pymemcache.readthedocs.org/en/latest/
+        :alt: Master Documentation Status
 
 A comprehensive, fast, pure-Python memcached client.
 
@@ -17,21 +24,24 @@ pymemcache supports the following features:
 Installing pymemcache
 =====================
 
-You can install pymemcache manually, with Nose tests, by doing the following:
+Install from pip:
+
+.. code-block:: bash
+
+  pip install pymemcache
+
+For development, clone from github and run the tests with:
+
+.. code-block:: bash
 
     git clone https://github.com/pinterest/pymemcache.git
     cd pymemcache
     python setup.py nosetests
-    sudo python setup.py install
-
-You can also use pip:
-
-    sudo pip install https://github.com/pinterest/pymemcache.git
 
 Usage
 =====
 
-See the module documentation in pymemcache.client for details.
+See the documentation here: http://pymemcache.readthedocs.org/en/latest/
 
 Comparison with Other Libraries
 ===============================
@@ -72,7 +82,7 @@ The memcached text protocol reference page:
   https://github.com/memcached/memcached/blob/master/doc/protocol.txt
 
 The python-memcached library (another pure-Python library):
-  http://www.tummy.com/Community/software/python-memcached/
+  https://github.com/linsomniac/python-memcached
 
 Mixpanel's Blog post about their memcached client for Python:
   http://code.mixpanel.com/2012/07/16/we-went-down-so-we-wrote-a-better-pure-python-memcache-client/
@@ -83,14 +93,18 @@ Mixpanel's pure Python memcached client:
 Credits
 =======
 
-* [Charles Gordon](http://github.com/cgordon)
-* [Dave Dash](http://github.com/davedash)
-* [Dan Crosta](http://github.com/dcrosta)
-* [Julian Berman](http://github.com/Julian)
-* [Mark Shirley](http://github.com/maspwr)
-* [Tim Bart](http://github.com/pims)
-* [Thomas Orozco](http://github.com/krallin)
-* [Marc Abramowitz](http://github.com/msabramo)
-* [Marc-Andre Courtois](http://github.com/mcourtois)
-* [Julien Danjou](http://github.com/jd)
-* [INADA Naoki](http://github.com/methane)
+* `Charles Gordon <http://github.com/cgordon>`_
+* `Dave Dash <http://github.com/davedash>`_
+* `Dan Crosta <http://github.com/dcrosta>`_
+* `Julian Berman <http://github.com/Julian>`_
+* `Mark Shirley <http://github.com/maspwr>`_
+* `Tim Bart <http://github.com/pims>`_
+* `Thomas Orozco <http://github.com/krallin>`_
+* `Marc Abramowitz <http://github.com/msabramo>`_
+* `Marc-Andre Courtois <http://github.com/mcourtois>`_
+* `Julien Danjou <http://github.com/jd>`_
+* `INADA Naoki <http://github.com/methane>`_
+* `James Socol <http://github.com/jsocol>`_
+* `Joshua Harlow <http://github.com/harlowja>`_
+* `John Anderson <http://github.com/sontek>`_
+* `Adam Chainz <http://github.com/adamchainz>`_

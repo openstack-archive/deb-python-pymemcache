@@ -12,66 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-A comprehensive, fast, pure-Python memcached client library.
-
-Basic Usage:
-------------
-
- from pymemcache.client import Client
-
- client = Client(('localhost', 11211))
- client.set('some_key', 'some_value')
- result = client.get('some_key')
-
-
-Serialization:
---------------
-
- import json
- from pymemcache.client import Client
-
- def json_serializer(key, value):
-     if type(value) == str:
-         return value, 1
-     return json.dumps(value), 2
-
- def json_deserializer(key, value, flags):
-     if flags == 1:
-         return value
-     if flags == 2:
-         return json.loads(value)
-     raise Exception("Unknown serialization format")
-
- client = Client(('localhost', 11211), serializer=json_serializer,
-                 deserializer=json_deserializer)
- client.set('key', {'a':'b', 'c':'d'})
- result = client.get('key')
-
-
-Best Practices:
----------------
-
- - Always set the connect_timeout and timeout arguments in the constructor to
-   avoid blocking your process when memcached is slow.
- - Use the "noreply" flag for a significant performance boost. The "noreply"
-   flag is enabled by default for "set", "add", "replace", "append", "prepend",
-   and "delete". It is disabled by default for "cas", "incr" and "decr". It
-   obviously doesn't apply to any get calls.
- - Use get_many and gets_many whenever possible, as they result in less
-   round trip times for fetching multiple keys.
- - Use the "ignore_exc" flag to treat memcache/network errors as cache misses
-   on calls to the get* methods. This prevents failures in memcache, or network
-   errors, from killing your web requests. Do not use this flag if you need to
-   know about errors from memcache, and make sure you have some other way to
-   detect memcache server failures.
-"""
-
 __author__ = "Charles Gordon"
 
-
+import errno
 import socket
 import six
+
+from pymemcache import pool
+
+from pymemcache.exceptions import (
+    MemcacheClientError,
+    MemcacheUnknownCommandError,
+    MemcacheIllegalInputError,
+    MemcacheServerError,
+    MemcacheUnknownError,
+    MemcacheUnexpectedCloseError
+)
 
 
 RECV_SIZE = 4096
@@ -109,65 +65,39 @@ STAT_TYPES = {
     b'slab_automove': lambda value: int(value) != 0,
 }
 
-
-class MemcacheError(Exception):
-    "Base exception class"
-    pass
+# Common helper functions.
 
 
-class MemcacheClientError(MemcacheError):
-    """Raised when memcached fails to parse the arguments to a request, likely
-    due to a malformed key and/or value, a bug in this library, or a version
-    mismatch with memcached."""
-    pass
-
-
-class MemcacheUnknownCommandError(MemcacheClientError):
-    """Raised when memcached fails to parse a request, likely due to a bug in
-    this library or a version mismatch with memcached."""
-    pass
-
-
-class MemcacheIllegalInputError(MemcacheClientError):
-    """Raised when a key or value is not legal for Memcache (see the class docs
-    for Client for more details)."""
-    pass
-
-
-class MemcacheServerError(MemcacheError):
-    """Raised when memcached reports a failure while processing a request,
-    likely due to a bug or transient issue in memcached."""
-    pass
-
-
-class MemcacheUnknownError(MemcacheError):
-    """Raised when this library receives a response from memcached that it
-    cannot parse, likely due to a bug in this library or a version mismatch
-    with memcached."""
-    pass
-
-
-class MemcacheUnexpectedCloseError(MemcacheServerError):
-    "Raised when the connection with memcached closes unexpectedly."
-    pass
+def _check_key(key, key_prefix=b''):
+    """Checks key and add key_prefix."""
+    if isinstance(key, six.text_type):
+        try:
+            key = key.encode('ascii')
+        except UnicodeEncodeError:
+            raise MemcacheIllegalInputError("No ascii key: %r" % (key,))
+    key = key_prefix + key
+    if b' ' in key:
+        raise MemcacheIllegalInputError("Key contains spaces: %r" % (key,))
+    if len(key) > 250:
+        raise MemcacheIllegalInputError("Key is too long: %r" % (key,))
+    return key
 
 
 class Client(object):
     """
     A client for a single memcached server.
 
-    Keys and Values:
-    ----------------
+    *Keys and Values*
 
      Keys must have a __str__() method which should return a str with no more
      than 250 ASCII characters and no whitespace or control characters. Unicode
      strings must be encoded (as UTF-8, for example) unless they consist only
      of ASCII characters that are neither whitespace nor control characters.
 
-     Values must have a __str__() method to convert themselves to a byte string.
-     Unicode objects can be a problem since str() on a Unicode object will
-     attempt to encode it as ASCII (which will fail if the value contains
-     code points larger than U+127). You can fix this will a serializer or by
+     Values must have a __str__() method to convert themselves to a byte
+     string. Unicode objects can be a problem since str() on a Unicode object
+     will attempt to encode it as ASCII (which will fail if the value contains
+     code points larger than U+127). You can fix this with a serializer or by
      just calling encode on the string (using UTF-8, for instance).
 
      If you intend to use anything but str as a value, it is a good idea to use
@@ -175,8 +105,7 @@ class Client(object):
      already implemented serializers, including one that is compatible with
      the python-memcache library.
 
-    Serialization and Deserialization:
-    ----------------------------------
+    *Serialization and Deserialization*
 
      The constructor takes two optional functions, one for "serialization" of
      values, and one for "deserialization". The serialization function takes
@@ -187,20 +116,23 @@ class Client(object):
 
      Here is an example using JSON for non-str values:
 
-      def serialize_json(key, value):
-          if type(value) == str:
-              return value, 1
-          return json.dumps(value), 2
+     .. code-block:: python
 
-      def deserialize_json(key, value, flags):
-          if flags == 1:
-              return value
-          if flags == 2:
-              return json.loads(value)
-          raise Exception("Unknown flags for value: {1}".format(flags))
+         def serialize_json(key, value):
+             if type(value) == str:
+                 return value, 1
+             return json.dumps(value), 2
 
-    Error Handling:
-    ---------------
+         def deserialize_json(key, value, flags):
+             if flags == 1:
+                 return value
+
+             if flags == 2:
+                 return json.loads(value)
+
+             raise Exception("Unknown flags for value: {1}".format(flags))
+
+    *Error Handling*
 
      All of the methods in this class that talk to memcached can throw one of
      the following exceptions:
@@ -266,7 +198,6 @@ class Client(object):
         self.ignore_exc = ignore_exc
         self.socket_module = socket_module
         self.sock = None
-        self.buf = b''
         if isinstance(key_prefix, six.text_type):
             key_prefix = key_prefix.encode('ascii')
         if not isinstance(key_prefix, bytes):
@@ -275,17 +206,7 @@ class Client(object):
 
     def check_key(self, key):
         """Checks key and add key_prefix."""
-        if isinstance(key, six.text_type):
-            try:
-                key = key.encode('ascii')
-            except UnicodeEncodeError as e:
-                raise MemcacheIllegalInputError("No ascii key: %r" % (key,))
-        key = self.key_prefix + key
-        if b' ' in key:
-            raise MemcacheIllegalInputError("Key contains spaces: %r" % (key,))
-        if len(key) > 250:
-            raise MemcacheIllegalInputError("Key is too long: %r" % (key,))
-        return key
+        return _check_key(key, key_prefix=self.key_prefix)
 
     def _connect(self):
         sock = self.socket_module.socket(self.socket_module.AF_INET,
@@ -307,7 +228,6 @@ class Client(object):
             except Exception:
                 pass
         self.sock = None
-        self.buf = b''
 
     def set(self, key, value, expire=0, noreply=True):
         """
@@ -350,6 +270,8 @@ class Client(object):
         for key, value in six.iteritems(values):
             self.set(key, value, expire, noreply)
         return True
+
+    set_multi = set_many
 
     def add(self, key, value, expire=0, noreply=True):
         """
@@ -467,6 +389,8 @@ class Client(object):
 
         return self._fetch_cmd(b'get', keys, False)
 
+    get_multi = get_many
+
     def gets(self, key):
         """
         The memcached "gets" command for one key, as a convenience.
@@ -538,6 +462,8 @@ class Client(object):
             self.delete(key, noreply)
 
         return True
+
+    delete_multi = delete_many
 
     def incr(self, key, value, noreply=False):
         """
@@ -646,7 +572,8 @@ class Client(object):
         Args:
           delay: optional int, the number of seconds to wait before flushing,
                  or zero to flush immediately (the default).
-          noreply: optional bool, True to not wait for the response (the default).
+          noreply: optional bool, True to not wait for the response
+                   (the default).
 
         Returns:
           True.
@@ -685,20 +612,20 @@ class Client(object):
             raise MemcacheServerError(error)
 
     def _fetch_cmd(self, name, keys, expect_cas):
-        if not self.sock:
-            self._connect()
-
         checked_keys = dict((self.check_key(k), k) for k in keys)
         cmd = name + b' ' + b' '.join(checked_keys) + b'\r\n'
 
         try:
+            if not self.sock:
+                self._connect()
+
             self.sock.sendall(cmd)
 
+            buf = b''
             result = {}
             while True:
-                self.buf, line = _readline(self.sock, self.buf)
+                buf, line = _readline(self.sock, buf)
                 self._raise_errors(line, name)
-
                 if line == b'END':
                     return result
                 elif line.startswith(b'VALUE'):
@@ -711,9 +638,7 @@ class Client(object):
                             raise ValueError("Unable to parse line %s: %s"
                                              % (line, str(e)))
 
-                    self.buf, value = _readvalue(self.sock,
-                                                 self.buf,
-                                                 int(size))
+                    buf, value = _readvalue(self.sock, buf, int(size))
                     key = checked_keys[key]
 
                     if self.deserializer:
@@ -767,7 +692,8 @@ class Client(object):
             if noreply:
                 return True
 
-            self.buf, line = _readline(self.sock, self.buf)
+            buf = b''
+            buf, line = _readline(self.sock, buf)
             self._raise_errors(line, name)
 
             if line in VALID_STORE_RESULTS[name]:
@@ -802,6 +728,202 @@ class Client(object):
         except Exception:
             self.close()
             raise
+
+    def __setitem__(self, key, value):
+        self.set(key, value, noreply=True)
+
+    def __getitem__(self, key):
+        value = self.get(key)
+        if value is None:
+            raise KeyError
+        return value
+
+    def __delitem__(self, key):
+        self.delete(key, noreply=True)
+
+
+class PooledClient(object):
+    """A thread-safe pool of clients (with the same client api).
+
+    Args:
+      max_pool_size: maximum pool size to use (going about this amount
+                     triggers a runtime error), by default this is 2147483648L
+                     when not provided (or none).
+      lock_generator: a callback/type that takes no arguments that will
+                      be called to create a lock or sempahore that can
+                      protect the pool from concurrent access (for example a
+                      eventlet lock or semaphore could be used instead)
+
+    Further arguments are interpreted as for :py:class:`.Client` constructor.
+    """
+
+    def __init__(self,
+                 server,
+                 serializer=None,
+                 deserializer=None,
+                 connect_timeout=None,
+                 timeout=None,
+                 no_delay=False,
+                 ignore_exc=False,
+                 socket_module=socket,
+                 key_prefix=b'',
+                 max_pool_size=None,
+                 lock_generator=None):
+        self.server = server
+        self.serializer = serializer
+        self.deserializer = deserializer
+        self.connect_timeout = connect_timeout
+        self.timeout = timeout
+        self.no_delay = no_delay
+        self.ignore_exc = ignore_exc
+        self.socket_module = socket_module
+        if isinstance(key_prefix, six.text_type):
+            key_prefix = key_prefix.encode('ascii')
+        if not isinstance(key_prefix, bytes):
+            raise TypeError("key_prefix should be bytes.")
+        self.key_prefix = key_prefix
+        self.client_pool = pool.ObjectPool(
+            self._create_client,
+            after_remove=lambda client: client.close(),
+            max_size=max_pool_size,
+            lock_generator=lock_generator)
+
+    def check_key(self, key):
+        """Checks key and add key_prefix."""
+        return _check_key(key, key_prefix=self.key_prefix)
+
+    def _create_client(self):
+        client = Client(self.server,
+                        serializer=self.serializer,
+                        deserializer=self.deserializer,
+                        connect_timeout=self.connect_timeout,
+                        timeout=self.timeout,
+                        no_delay=self.no_delay,
+                        # We need to know when it fails *always* so that we
+                        # can remove/destroy it from the pool...
+                        ignore_exc=False,
+                        socket_module=self.socket_module,
+                        key_prefix=self.key_prefix)
+        return client
+
+    def close(self):
+        self.client_pool.clear()
+
+    def set(self, key, value, expire=0, noreply=True):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.set(key, value, expire=expire, noreply=noreply)
+
+    def set_many(self, values, expire=0, noreply=True):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.set_many(values, expire=expire, noreply=noreply)
+
+    set_multi = set_many
+
+    def replace(self, key, value, expire=0, noreply=True):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.replace(key, value, expire=expire, noreply=noreply)
+
+    def append(self, key, value, expire=0, noreply=True):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.append(key, value, expire=expire, noreply=noreply)
+
+    def prepend(self, key, value, expire=0, noreply=True):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.prepend(key, value, expire=expire, noreply=noreply)
+
+    def cas(self, key, value, cas, expire=0, noreply=False):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.cas(key, value, cas,
+                              expire=expire, noreply=noreply)
+
+    def get(self, key):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            try:
+                return client.get(key)
+            except Exception:
+                if self.ignore_exc:
+                    return None
+                else:
+                    raise
+
+    def get_many(self, keys):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            try:
+                return client.get_many(keys)
+            except Exception:
+                if self.ignore_exc:
+                    return {}
+                else:
+                    raise
+
+    get_multi = get_many
+
+    def gets(self, key):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            try:
+                return client.gets(key)
+            except Exception:
+                if self.ignore_exc:
+                    return (None, None)
+                else:
+                    raise
+
+    def gets_many(self, keys):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            try:
+                return client.gets_many(keys)
+            except Exception:
+                if self.ignore_exc:
+                    return {}
+                else:
+                    raise
+
+    def delete(self, key, noreply=True):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.delete(key, noreply=noreply)
+
+    def delete_many(self, keys, noreply=True):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.delete_many(keys, noreply=noreply)
+
+    delete_multi = delete_many
+
+    def add(self, key, value, expire=0, noreply=True):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.add(key, value, expire=expire, noreply=noreply)
+
+    def incr(self, key, value, noreply=False):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.incr(key, value, noreply=noreply)
+
+    def decr(self, key, value, noreply=False):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.decr(key, value, noreply=noreply)
+
+    def touch(self, key, expire=0, noreply=True):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.touch(key, expire=expire, noreply=noreply)
+
+    def stats(self, *args):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            try:
+                return client.stats(*args)
+            except Exception:
+                if self.ignore_exc:
+                    return {}
+                else:
+                    raise
+
+    def flush_all(self, delay=0, noreply=True):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            return client.flush_all(delay=delay, noreply=noreply)
+
+    def quit(self):
+        with self.client_pool.get_and_release(destroy_on_fail=True) as client:
+            try:
+                client.quit()
+            finally:
+                self.client_pool.destroy(client)
 
     def __setitem__(self, key, value):
         self.set(key, value, noreply=True)
@@ -859,7 +981,7 @@ def _readline(sock, buf):
             chunks.append(buf)
             last_char = buf[-1:]
 
-        buf = sock.recv(RECV_SIZE)
+        buf = _recv(sock, RECV_SIZE)
         if not buf:
             raise MemcacheUnexpectedCloseError()
 
@@ -890,7 +1012,7 @@ def _readvalue(sock, buf, size):
         if buf:
             rlen -= len(buf)
             chunks.append(buf)
-        buf = sock.recv(RECV_SIZE)
+        buf = _recv(sock, RECV_SIZE)
         if not buf:
             raise MemcacheUnexpectedCloseError()
 
@@ -907,3 +1029,13 @@ def _readvalue(sock, buf, size):
         chunks.append(buf[:rlen - 2])
 
     return buf[rlen:], b''.join(chunks)
+
+
+def _recv(sock, size):
+    """sock.recv() with retry on EINTR"""
+    while True:
+        try:
+            return sock.recv(size)
+        except IOError as e:
+            if e.errno != errno.EINTR:
+                raise
