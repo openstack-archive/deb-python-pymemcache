@@ -1,3 +1,9 @@
+python-pymemcache (1.3.2-2) unstable; urgency=medium
+
+  * Added missing python{3,}-mock depends (Closes: #795565).
+
+ -- Thomas Goirand <zigo@debian.org>  Tue, 25 Aug 2015 20:29:29 +0000
+
 python-pymemcache (1.3.2-1) unstable; urgency=medium
 
   * New upstream release.
