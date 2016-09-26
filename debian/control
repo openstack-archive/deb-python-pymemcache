@@ -20,8 +20,8 @@ Build-Depends-Indep: python-nose,
                      python3-mock,
                      python3-six,
 Standards-Version: 3.9.6
-Vcs-Browser: https://anonscm.debian.org/cgit/openstack/python-pymemcache.git/
-Vcs-Git: https://anonscm.debian.org/git/openstack/python-pymemcache.git
+Vcs-Browser: https://git.openstack.org/cgit/openstack/deb-python-pymemcache?h=debian%2Fnewton
+Vcs-Git: https://git.openstack.org/openstack/deb-python-pymemcache -b debian/newton
 Homepage: https://github.com/Pinterest/pymemcache
 
 Package: python-pymemcache
