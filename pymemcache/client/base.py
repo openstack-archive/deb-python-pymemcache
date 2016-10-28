@@ -16,6 +16,7 @@ import socket
 import six
 
 from pymemcache import pool
+from pymemcache.client.murmur3 import murmur3_32
 
 from pymemcache.exceptions import (
     MemcacheClientError,
@@ -87,7 +88,8 @@ def _check_key(key, key_prefix=b''):
         try:
             key = key.encode('ascii')
         except (UnicodeEncodeError, UnicodeDecodeError):
-            raise MemcacheIllegalInputError("Non-ASCII key: '%r'" % (key,))
+            # Use murmur hash on unicode keys
+            key = str(murmur3_32(key))
     key = key_prefix + key
     if b' ' in key or b'\n' in key:
         raise MemcacheIllegalInputError(
