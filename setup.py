@@ -11,6 +11,8 @@ def read(fname):
 readme = read('README.rst')
 changelog = read('ChangeLog.rst')
 
+with open('requirements.txt') as f:
+    required = f.readlines()
 
 setup(
     name='pymemcache',
@@ -18,7 +20,7 @@ setup(
     author='Charles Gordon',
     author_email='charles@pinterest.com',
     packages=find_packages(),
-    install_requires=['six'],
+    install_requires=required,
     description='A comprehensive, fast, pure Python memcached client',
     long_description=readme + '\n' + changelog,
     license='Apache License 2.0',
